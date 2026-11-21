@@ -734,4 +734,22 @@
             amount: Number(pay.toFixed(2))
           });
         }
-        debtors[i].amount = Number((debtors[i].amount - pay
+        debtors[i].amount = Number((debtors[i].amount - pay ).toFixed(2));
+      creditors[j].amount = Number(
+        (creditors[j].amount - pay).toFixed(2)
+      );
+    }
+    if (debtors[i].amount < 0.01) i++;
+    if (creditors[j].amount < 0.01) j++;
+  }
+  return transfers;
+}
+
+if (typeof syncSelectors === "function") syncSelectors();
+if (typeof renderAll === "function") renderAll();
+if (typeof connectRoom === "function" && typeof currentRoom !== "undefined") {
+  connectRoom(currentRoom);
+}
+</script>
+</body>
+</html>
