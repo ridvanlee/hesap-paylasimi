@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ortak Hesap & Mahsuplaşma</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #0f172a; }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Üst Bilgi Çubuğu -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">₺</div>
+        <div>
+          <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight">Ortak Hesap & Mahsuplaşma</h1>
+          <div class="flex items-center gap-2 text-xs text-slate-500">
+            <span id="syncDot" class="inline-block w-2 h-2 rounded-full bg-amber-400"></span>
+            <span id="syncText">Bulut bağlantısı kuruluyor...</span>
+            <span>•</span>
+            <button onclick="changeRoom()" class="text-indigo-600 hover:underline font-medium" title="Oda kodunu değiştir">
+              Oda: <span id="roomBadge">ekip-ortak</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- Aktif Kullanıcı Seçimi -->
+        <div class="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200">
+          <span class="text-xs text-slate-500 font-medium">Ben:</span>
+          <select id="activeUserSelect" onchange="setActiveUser(this.value)" class="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"></select>
+        </div>
+
+        <!-- Dönem Filtresi -->
+        <select id="periodFilter" onchange="renderAll()" class="bg-white border border-slate-300 text-slate-700 text-xs sm:text-sm rounded-lg px-2.5 py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="ALL">Tüm Zamanlar (Açık Bakiyeler)</option>
+        </select>
+
+        <!-- Link Kopyala -->
+        <button onclick="copyShareLink()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs sm:text-sm font-medium px-3 py-1.5 rounded-lg transition">
+          Linki Kopyala
+        </button>
+
+        <!-- Kişiler & Yedek -->
+        <button onclick="openModal('membersModal')" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs sm:text-sm font-medium px-3 py-1.5 rounded-lg transition">
+          Kişiler (<span id="memberCount">8</span>)
+        </button>
+        <button onclick="exportJSON()" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs sm:text-sm font-medium px-3 py-1.5 rounded-lg transition" title="Verileri bilgisayara yedekle">
+          Yedek İndir
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Bildirim Alanı -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 hidden bg-slate-900 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg transition-opacity"></div>
+
+  <!-- Ana İçerik -->
+  <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex-1 space-y-6">
+
+    <!-- Özet Kartları -->
+    <section class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Toplam Harcama</div>
+        <div id="statTotalSpent" class="text-2xl font-bold text-slate-900 mt-1 tabular-nums">0,00 ₺</div>
+        <div id="statPeriodLabel" class="text-xs text-slate-400 mt-1">Seçili dönem toplamı</div>
+      </div>
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Açık (Ödenmemiş) Borç</div>
+        <div id="statOpenDebt" class="text-2xl font-bold text-rose-600 mt-1 tabular-nums">0,00 ₺</div>
+        <div class="text-xs text-slate-400 mt-1">Henüz kapatılmamış taksit/paylar</div>
+      </div>
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Mahsuplaşma Sonrası Net</div>
+        <div id="statNetTransfer" class="text-2xl font-bold text-indigo-600 mt-1 tabular-nums">0,00 ₺</div>
+        <div class="text-xs text-slate-400 mt-1">Karşılıklı alacaklar düşüldükten sonra</div>
+      </div>
+    </section>
+
+    <!-- Orta Grid: Sol Ödeme Formu / Sağ Mahsuplaşma Özeti -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+      <!-- Yeni Ödeme Ekleme Formu (5 Kolon) -->
+      <section class="lg:col-span-5 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <h2 class="text-base font-bold text-slate-900 mb-4 flex items-center justify-between">
+          <span>Yeni Ödeme Gir</span>
+          <span class="text-xs font-normal text-slate-400">Otomatik bölüşüm & mahsup</span>
+        </h2>
+
+        <form id="expenseForm" onsubmit="handleAddExpense(event)" class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Ödemeyi Yapan</label>
+              <select id="payerSelect" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"></select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Toplam Tutar (₺)</label>
+              <input type="number" id="amountInput" step="0.01" min="0.01" required placeholder="Örn: 3000"
+                class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Açıklama</label>
+            <input type="text" id="descInput" required placeholder="Örn: Market, Kira, Fatura, Yemek..."
+              class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Ödeme Şekli</label>
+              <select id="installmentSelect" onchange="toggleInstallmentHint()" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="1">Tek Seferde (Peşin)</option>
+                <option value="2">2 Taksit (Aylık)</option>
+                <option value="3">3 Taksit (Aylık)</option>
+                <option value="4">4 Taksit (Aylık)</option>
+                <option value="5">5 Taksit (Aylık)</option>
+                <option value="6">6 Taksit (Aylık)</option>
+                <option value="9">9 Taksit (Aylık)</option>
+                <option value="12">12 Taksit (Aylık)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">İlk Taksit / Ödeme Ayı</label>
+              <input type="month" id="startMonthInput" required
+                class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            </div>
+          </div>
+
+          <!-- Paylaşılacak Kişiler -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-xs font-semibold text-slate-700">Bölüşülecek Kişiler</label>
+              <div class="space-x-2 text-xs">
+                <button type="button" onclick="selectAllParticipants(true)" class="text-indigo-600 hover:underline font-medium">Tümünü Seç</button>
+                <span class="text-slate-300">|</span>
+                <button type="button" onclick="selectAllParticipants(false)" class="text-slate-500 hover:underline">Temizle</button>
+              </div>
+            </div>
+            <div id="participantsBox" class="grid grid-cols-2 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 max-h-48 overflow-y-auto"></div>
+            <p id="splitPreview" class="text-xs text-slate-500 mt-1.5">Kişi başı pay burada hesaplanacak.</p>
+          </div>
+
+          <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-xl shadow-sm transition text-sm">
+            Ödemeyi Kaydet ve Borçları Güncelle
+          </button>
+        </form>
+      </section>
+
+      <!-- Sağ Panel: Karşılıklı Mahsuplaşma Sonuçları (7 Kolon) -->
+      <section class="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <h2 class="text-base font-bold text-slate-900">Güncel Net Borç & Mahsuplaşma</h2>
+            <p class="text-xs text-slate-500">Yalnızca ödenmemiş kalemler üzerinden karşılıklı alacaklar düşülür.</p>
+          </div>
+          <div class="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+            <button id="tabPairwise" onclick="setSettlementMode('PAIRWISE')" class="px-3 py-1.5 rounded-lg bg-white text-indigo-700 shadow-sm transition">
+              İkili Mahsuplaşma
+            </button>
+            <button id="tabSimplified" onclick="setSettlementMode('SIMPLIFIED')" class="px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition">
+              En Az Transfer
+            </button>
+          </div>
+        </div>
+
+        <!-- Kişi Bazlı Net Durum Rozetleri -->
+        <div id="personNetBadges" class="grid grid-cols-2 sm:grid-cols-4 gap-2"></div>
+
+        <!-- Borç Transfer Listesi -->
+        <div id="settlementList" class="space-y-2.5 pt-1"></div>
+      </section>
+    </div>
+
+    <!-- Alt Grid: Harcama Detayları (Sol) & İşlem Geçmişi (Sağ) -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+      <!-- Harcamalar ve Taksit Ödeme Takibi (7 Kolon) -->
+      <section class="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base font-bold text-slate-900">Harcamalar & Taksit Takibi</h2>
+            <p class="text-xs text-slate-500">Ödenen payları işaretleyin; mahsuplaşma anında yeniden hesaplanır.</p>
+          </div>
+          <select id="personFilter" onchange="renderAll()" class="bg-slate-50 border border-slate-300 text-slate-700 text-xs rounded-lg px-2.5 py-1.5 font-medium">
+            <option value="ALL">Tüm Kişiler</option>
+          </select>
+        </div>
+
+        <div id="expensesList" class="space-y-3"></div>
+      </section>
+
+      <!-- Kronolojik İşlem Geçmişi / Denetim Kaydı (5 Kolon) -->
+      <section class="lg:col-span-5 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold text-slate-900">İşlem Geçmişi (Sıralı Kayıt)</h2>
+            <p class="text-xs text-slate-500">Kim ne zaman ne ekledi veya ödedi</p>
+          </div>
+          <span id="logCountBadge" class="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">0 kayıt</span>
+        </div>
+
+        <div id="auditLogList" class="space-y-2.5 max-h-[540px] overflow-y-auto pr-1"></div>
+      </section>
+    </div>
+
+  </main>
+
+  <!-- Kişi Yönetimi Modalı -->
+  <div id="membersModal" class="fixed inset-0 bg-slate-900/50 z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="font-bold text-slate-900">Kişi Listesi</h3>
+        <button onclick="closeModal('membersModal')" class="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+      </div>
+      <form onsubmit="handleAddMember(event)" class="flex gap-2">
+        <input type="text" id="newMemberInput" placeholder="Yeni kişi adı..." required
+          class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-xl">Ekle</button>
+      </form>
+      <div id="membersModalList" class="space-y-2 max-h-64 overflow-y-auto"></div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK (Compat - Tek Dosya Kolay Kullanım) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+  <script>
+    // Sizin Firebase Realtime Database adresiniz
+    const FIREBASE_DB_URL = "https://hesap-paylasimi-default-rtdb.firebaseio.com";
+
+    const DEFAULT_MEMBERS = [
+      "Rıdvan", "Murat", "Fatma", "Hatice",
+      "Ali Doğan", "Mazlum", "Selahattin", "Mülkiye"
+    ];
+
+    // URL'den oda adını al (?oda=ekip-ortak)
+    const urlParams = new URLSearchParams(window.location.search);
+    let currentRoom = (urlParams.get("oda") || "ekip-ortak").replace(/[^a-zA-Z0-9-_]/g, "");
+    document.getElementById("roomBadge").textContent = currentRoom;
+
+    let activeUser = localStorage.getItem("ortak_aktif_kullanici") || DEFAULT_MEMBERS[0];
+    let settlementMode = "PAIRWISE"; // PAIRWISE | SIMPLIFIED
+    let db = null;
+    let roomRef = null;
+
+    let appState = {
+      members: [...DEFAULT_MEMBERS],
+      expenses: [],
+      logs: []
+    };
+
+    // Başlangıç ayı olarak bugünün YYYY-MM değerini ata
+    const now = new Date();
+    const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    document.getElementById("startMonthInput").value = currentYM;
+
+    // Firebase başlat
+    try {
+      firebase.initializeApp({ databaseURL: FIREBASE_DB_URL });
+      db = firebase.database();
+      connectRoom(currentRoom);
+    } catch (err) {
+      setSyncStatus(false, "Bağlantı hatası");
+      console.error(err);
+    }
+
+    function connectRoom(roomName) {
+      if (roomRef) roomRef.off();
+      roomRef = db.ref("odalar/" + roomName);
+
+      roomRef.on("value", (snapshot) => {
+        const val = snapshot.val();
+        if (!val) {
+          // Oda boşsa varsayılan 8 kişiyi kaydet
+          const initialData = {
+            members: DEFAULT_MEMBERS,
+            expenses: [],
+            logs: [{
+              id: "log_" + Date.now(),
+              time: new Date().toISOString(),
+              actor: "Sistem",
+              type: "INFO",
+              text: "Ortak hesap odası oluşturuldu (8 kişi tanımlandı)."
+            }]
+          };
+          roomRef.set(initialData);
+          return;
+        }
+
+        appState.members = Array.isArray(val.members) && val.members.length ? val.members : [...DEFAULT_MEMBERS];
+        appState.expenses = val.expenses ? Object.values(val.expenses) : [];
+        appState.logs = val.logs ? Object.values(val.logs) : [];
+
+        // Tarihe göre sırala
+        appState.expenses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        appState.logs.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+        setSyncStatus(true, "Canlı senkronize");
+        syncSelectors();
+        renderAll();
+      }, (error) => {
+        setSyncStatus(false, "Okuma izni hatası (Rules kontrol edin)");
+        console.error(error);
+      });
+    }
+
+    function saveStateToCloud(newLogEntry = null) {
+      if (newLogEntry) {
+        appState.logs.unshift(newLogEntry);
+        if (appState.logs.length > 200) appState.logs = appState.logs.slice(0, 200);
+      }
+      roomRef.set({
+        members: appState.members,
+        expenses: appState.expenses,
+        logs: appState.logs
+      }).catch(err => {
+        showToast("Kaydedilirken hata oluştu: " + err.message);
+      });
+    }
+
+    function setSyncStatus(ok, text) {
+      const dot = document.getElementById("syncDot");
+      const label = document.getElementById("syncText");
+      dot.className = "inline-block w-2 h-2 rounded-full " + (ok ? "bg-emerald-500" : "bg-rose-500");
+      label.textContent = text;
+    }
+
+    function setActiveUser(name) {
+      activeUser = name;
+      localStorage.setItem("ortak_aktif_kullanici", name);
+      document.getElementById("payerSelect").value = name;
+    }
+
+    function changeRoom() {
+      const next = prompt("Bağlanmak istediğiniz oda kodunu yazın (Türkçe karakter ve boşluk olmadan):", currentRoom);
+      if (!next) return;
+      const cleaned = next.trim().replace(/[^a-zA-Z0-9-_]/g, "");
+      if (!cleaned) return;
+      currentRoom = cleaned;
+      document.getElementById("roomBadge").textContent = currentRoom;
+      const newUrl = `${window.location.pathname}?oda=${encodeURIComponent(currentRoom)}`;
+      window.history.replaceState({}, "", newUrl);
+      connectRoom(currentRoom);
+      showToast(`"${currentRoom}" odasına geçildi.`);
+    }
+
+    function copyShareLink() {
+      const url = `${window.location.origin}${window.location.pathname}?oda=${encodeURIComponent(currentRoom)}`;
+      navigator.clipboard.writeText(url).then(() => {
+        showToast("Grup linki kopyalandı! WhatsApp'a yapıştırabilirsiniz.");
+      }).catch(() => {
+        prompt("Bu linki kopyalayıp paylaşın:", url);
+      });
+    }
+
+    function syncSelectors() {
+      const members = appState.members;
+      if (!members.includes(activeUser)) activeUser = members[0];
+
+      // Üst "Ben" seçici
+      const activeSel = document.getElementById("activeUserSelect");
+      activeSel.innerHTML = members.map(m => `<option value="${m}" ${m === activeUser ? "selected" : ""}>${m}</option>`).join("");
+
+      // Form "Ödemeyi Yapan"
+      const payerSel = document.getElementById("payerSelect");
+      const prevPayer = payerSel.value || activeUser;
+      payerSel.innerHTML = members.map(m => `<option value="${m}" ${m === prevPayer ? "selected" : ""}>${m}</option>`).join("");
+
+      // Filtre "Tüm Kişiler"
+      const personFilter = document.getElementById("personFilter");
+      const prevFilter = personFilter.value || "ALL";
+      personFilter.innerHTML = `<option value="ALL">Tüm Kişiler</option>` +
+        members.map(m => `<option value="${m}" ${m === prevFilter ? "selected" : ""}>${m}</option>`).join("");
+
+      // Form "Bölüşülecek Kişiler" onay kutuları
+      const checkedBefore = new Set(
+        Array.from(document.querySelectorAll('input[name="participant"]:checked')).map(el => el.value)
+      );
+      const useDefaultAll = checkedBefore.size === 0;
+
+      const box = document.getElementById("participantsBox");
+      box.innerHTML = members.map(m => {
+        const checked = useDefaultAll || checkedBefore.has(m) ? "checked" : "";
+        return `
+          <label class="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer hover:border-indigo-300 text-xs font-medium">
+            <input type="checkbox" name="participant" value="${m}" ${checked} onchange="updateSplitPreview()" class="rounded text-indigo-600 focus:ring-indigo-500">
+            <span class="truncate">${m}</span>
+          </label>
+        `;
+      }).join("");
+
+      document.getElementById("memberCount").textContent = members.length;
+      updatePeriodOptions();
+      updateSplitPreview();
+    }
+
+    function selectAllParticipants(flag) {
+      document.querySelectorAll('input[name="participant"]').forEach(cb => cb.checked = flag);
+      updateSplitPreview();
+    }
+
+    function updateSplitPreview() {
+      const amount = parseFloat(document.getElementById("amountInput").value) || 0;
+      const installments = parseInt(document.getElementById("installmentSelect").value, 10) || 1;
+      const selected = Array.from(document.querySelectorAll('input[name="participant"]:checked')).map(el => el.value);
+
+      const preview = document.getElementById("splitPreview");
+      if (amount <= 0 || selected.length === 0) {
+        preview.textContent = "Tutar ve en az 1 kişi seçildiğinde pay tutarı görünür.";
+        return;
+      }
+      const perPerson = amount / selected.length;
+      const perMonth = perPerson / installments;
+      preview.innerHTML = installments > 1
+        ? `Kişi başı toplam <b>${formatTRY(perPerson)}</b> • Aylık taksit: <b>${formatTRY(perMonth)}</b> (${selected.length} kişi)`
+        : `Kişi başı tek seferlik pay: <b>${formatTRY(perPerson)}</b> (${selected.length} kişi)`;
+    }
+
+    document.getElementById("amountInput").addEventListener("input", updateSplitPreview);
+    function toggleInstallmentHint() { updateSplitPreview(); }
+
+    function addMonthsYM(ym, add) {
+      const [y, m] = ym.split("-").map(Number);
+      const d = new Date(y, (m - 1) + add, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    }
+
+    function formatYM(ym) {
+      if (!ym || ym === "ALL") return "Tüm Zamanlar";
+      const [y, m] = ym.split("-");
+      const aylar = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+      return `${aylar[parseInt(m, 10) - 1]} ${y}`;
+    }
+
+    function updatePeriodOptions() {
+      const months = new Set([currentYM]);
+      appState.expenses.forEach(exp => {
+        (exp.items || []).forEach(it => {
+          if (it.month) months.add(it.month);
+        });
+      });
+      const sorted = Array.from(months).sort();
+      const sel = document.getElementById("periodFilter");
+      const currentVal = sel.value || "ALL";
+      sel.innerHTML = `<option value="ALL">Tüm Zamanlar (Açık Bakiyeler)</option>` +
+        sorted.map(m => `<option value="${m}" ${m === currentVal ? "selected" : ""}>${formatYM(m)} Dönemi</option>`).join("");
+    }
+
+    // Yeni ödeme ekle
+    function handleAddExpense(e) {
+      e.preventDefault();
+      const payer = document.getElementById("payerSelect").value;
+      const amount = parseFloat(document.getElementById("amountInput").value);
+      const desc = document.getElementById("descInput").value.trim();
+      const installments = parseInt(document.getElementById("installmentSelect").value, 10) || 1;
+      const startMonth = document.getElementById("startMonthInput").value || currentYM;
+      const participants = Array.from(document.querySelectorAll('input[name="participant"]:checked')).map(el => el.value);
+
+      if (!payer || !desc || !(amount > 0) || participants.length === 0) {
+        showToast("Lütfen tüm alanları ve en az bir kişiyi seçin.");
+        return;
+      }
+
+      const perPersonTotal = amount / participants.length;
+      const perInstallment = Number((perPersonTotal / installments).toFixed(2));
+      const items = [];
+
+      for (let t = 0; t < installments; t++) {
+        const month = addMonthsYM(startMonth, t);
+        participants.forEach(person => {
+          // Ödeyen kişinin kendi payı borç yazılmaz
+          if (person === payer) return;
+          items.push({
+            id: `it_${Date.now()}_${t}_${Math.random().toString(36).slice(2, 6)}`,
+            debtor: person,
+            creditor: payer,
+            month: month,
+            installmentNo: t + 1,
+            installmentTotal: installments,
+            amount: perInstallment,
+            paid: false,
+            paidAt: null
+          });
+        });
+      }
+
+      const newExpense = {
+        id: "exp_" + Date.now(),
+        createdAt: new Date().toISOString(),
+        createdBy: activeUser,
+        payer: payer,
+        description: desc,
+        totalAmount: Number(amount.toFixed(2)),
+        installments: installments,
+        startMonth: startMonth,
+        participants: participants,
+        items: items
+      };
+
+      appState.expenses.unshift(newExpense);
+
+      const logEntry = {
+        id: "log_" + Date.now(),
+        time: new Date().toISOString(),
+        actor: activeUser,
+        type: "ADD",
+        text: `${payer} adına "${desc}" için ${formatTRY(amount)} (${installments > 1 ? installments + " taksit" : "peşin"}) girildi. Paylaşanlar: ${participants.join(", ")}.`
+      };
+
+      saveStateToCloud(logEntry);
+      document.getElementById("descInput").value = "";
+      document.getElementById("amountInput").value = "";
+      updateSplitPreview();
+      showToast("Ödeme kaydedildi ve karşılıklı borçlar güncellendi.");
+    }
+
+    // Tek bir taksit/pay kalemini Ödendi / Ödenmedi yap
+    function toggleItemPaid(expenseId, itemId) {
+      const exp = appState.expenses.find(x => x.id === expenseId);
+      if (!exp) return;
+      const item = (exp.items || []).find(i => i.id === itemId);
+      if (!item) return;
+
+      item.paid = !item.paid;
+      item.paidAt = item.paid ? new Date().toISOString() : null;
+
+      const logEntry = {
+        id: "log_" + Date.now(),
+        time: new Date().toISOString(),
+        actor: activeUser,
+        type: item.paid ? "PAID" : "UNPAID",
+        text: item.paid
+          ? `${item.debtor} → ${item.creditor} (${exp.description} ${item.installmentNo}/${item.installmentTotal} - ${formatTRY(item.amount)}) ÖDENDİ işaretlendi.`
+          : `${item.debtor} → ${item.creditor} (${exp.description} ${item.installmentNo}/${item.installmentTotal}) tekrar ÖDENMEDİ yapıldı.`
+      };
+
+      saveStateToCloud(logEntry);
+    }
+
+    // İki kişi arasındaki tüm açık kalemleri tek tıkla mahsuplaştırıp kapat
+    function settlePair(personA, personB) {
+      const period = document.getElementById("periodFilter").value;
+      if (!confirm(`${personA} ile ${personB} arasındaki ${period === "ALL" ? "tüm açık" : formatYM(period) + " dönemi"} karşılıklı borçları mahsuplaştırıp kapatmak istiyor musunuz?`)) {
+        return;
+      }
+
+      let closedCount = 0;
+      appState.expenses.forEach(exp => {
+        (exp.items || []).forEach(it => {
+          if (it.paid) return;
+          if (period !== "ALL" && it.month !== period) return;
+          const match = (it.debtor === personA && it.creditor === personB) ||
+                        (it.debtor === personB && it.creditor === personA);
+          if (match) {
+            it.paid = true;
+            it.paidAt = new Date().toISOString();
+            closedCount++;
+          }
+        });
+      });
+
+      if (closedCount > 0) {
+        const logEntry = {
+          id: "log_" + Date.now(),
+          time: new Date().toISOString(),
+          actor: activeUser,
+          type: "SETTLE",
+          text: `${personA} ↔ ${personB} arasındaki ${closedCount} adet açık kalem karşılıklı mahsuplaştırılarak kapatıldı.`
+        };
+        saveStateToCloud(logEntry);
+        showToast("Karşılıklı bakiye sıfırlandı.");
+      }
+    }
+
+    // Harcama kaydını sil
+    function deleteExpense(expenseId) {
+      const idx = appState.expenses.findIndex(x => x.id === expenseId);
+      if (idx === -1) return;
+      const exp = appState.expenses[idx];
+      if (!confirm(`"${exp.description}" (${formatTRY(exp.totalAmount)}) kaydını silmek istediğinize emin misiniz?`)) return;
+
+      appState.expenses.splice(idx, 1);
+      const logEntry = {
+        id: "log_" + Date.now(),
+        time: new Date().toISOString(),
+        actor: activeUser,
+        type: "DELETE",
+        text: `"${exp.description}" (${exp.payer} - ${formatTRY(exp.totalAmount)}) harcaması silindi.`
+      };
+      saveStateToCloud(logEntry);
+      showToast("Harcama kaydı silindi.");
+    }
+
+    function setSettlementMode(mode) {
+      settlementMode = mode;
+      const btnPair = document.getElementById("tabPairwise");
+      const btnSimp = document.getElementById("tabSimplified");
+      if (mode === "PAIRWISE") {
+        btnPair.className = "px-3 py-1.5 rounded-lg bg-white text-indigo-700 shadow-sm transition";
+        btnSimp.className = "px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition";
+      } else {
+        btnSimp.className = "px-3 py-1.5 rounded-lg bg-white text-indigo-700 shadow-sm transition";
+        btnPair.className = "px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition";
+      }
+      renderSettlements();
+    }
+
+    // Tüm ekranı yeniden çiz
+    function renderAll() {
+      renderStats();
+      renderSettlements();
+      renderExpenses();
+      renderLogs();
+    }
+
+    function getFilteredUnpaidItems() {
+      const period = document.getElementById("periodFilter").value;
+      const unpaid = [];
+      appState.expenses.forEach(exp => {
+        (exp.items || []).forEach(it => {
+          if (it.paid) return;
+          if (period !== "ALL" && it.month !== period) return;
+          unpaid.push({ ...it, description: exp.description });
+        });
+      });
+      return unpaid;
+    }
+
+    function renderStats() {
+      const period = document.getElementById("periodFilter").value;
+      let totalSpent = 0;
+
+      appState.expenses.forEach(exp => {
+        if (period === "ALL") {
+          totalSpent += exp.totalAmount;
+        } else {
+          // O aya düşen taksit payı (ödeyen dahil)
+          const monthShare = (exp.totalAmount / exp.installments);
+          const endMonth = addMonthsYM(exp.startMonth, exp.installments - 1);
+          if (period >= exp.startMonth && period <= endMonth) {
+            totalSpent += monthShare;
+          }
+        }
+      });
+
+      const unpaid = getFilteredUnpaidItems();
+      const openDebt = unpaid.reduce((acc, it) => acc + it.amount, 0);
+
+      // İkili mahsuplaşma sonrası net toplam
+      const pairs = computePairwiseNet(unpaid);
+      const netSum = pairs.reduce((acc, p) => acc + p.amount, 0);
+
+      document.getElementById("statTotalSpent").textContent = formatTRY(totalSpent);
+      document.getElementById("statPeriodLabel").textContent = period === "ALL" ? "Tüm zamanlar harcaması" : `${formatYM(period)} dönemi payı`;
+      document.getElementById("statOpenDebt").textContent = formatTRY(openDebt);
+      document.getElementById("statNetTransfer").textContent = formatTRY(netSum);
+    }
+
+    // İkili Karşılıklı Mahsuplaşma: A'nın B'ye borcu ile B'nin A'ya borcunu birbirinden düşer
+    function computePairwiseNet(unpaidItems) {
+      const raw = {}; // "Borclu|Alacakli" -> tutar
+      unpaidItems.forEach(it => {
+        const key = `${it.debtor}|${it.creditor}`;
+        raw[key] = (raw[key] || 0) + it.amount;
+      });
+
+      const members = appState.members;
+      const results = [];
+
+      for (let i = 0; i < members.length; i++) {
+        for (let j = i + 1; j < members.length; j++) {
+          const a = members[i];
+          const b = members[j];
+          const aOwesB = raw[`${a}|${b}`] || 0;
+          const bOwesA = raw[`${b}|${a}`] || 0;
+          const diff = Number((aOwesB - bOwesA).toFixed(2));
+
+          if (Math.abs(diff) >= 0.01) {
+            results.push({
+              from: diff > 0 ? a : b,
+              to: diff > 0 ? b : a,
+              amount: Math.abs(diff),
+              grossFromTo: diff > 0 ? aOwesB : bOwesA,
+              offsetAmount: Math.min(aOwesB, bOwesA)
+            });
+          }
+        }
+      }
+      return results.sort((x, y) => y.amount - x.amount);
+    }
+
+    // Grup içi en az transferle borç kapatma
+    function computeSimplifiedTransfers(unpaidItems) {
+      const net = {};
+      appState.members.forEach(m => net[m] = 0);
+
+      unpaidItems.forEach(it => {
+        net[it.debtor] = (net[it.debtor] || 0) - it.amount;
+        net[it.creditor] = (net[it.creditor] || 0) + it.amount;
+      });
+
+      const debtors = [];
+      const creditors = [];
+
+      Object.entries(net).forEach(([person, val]) => {
+        const rounded = Number(val.toFixed(2));
+        if (rounded < -0.01) debtors.push({ person, amount: Math.abs(rounded) });
+        if (rounded > 0.01) creditors.push({ person, amount: rounded });
+      });
+
+      debtors.sort((a, b) => b.amount - a.amount);
+      creditors.sort((a, b) => b.amount - a.amount);
+
+      const transfers = [];
+      let i = 0, j = 0;
+      while (i < debtors.length && j < creditors.length) {
+        const pay = Math.min(debtors[i].amount, creditors[j].amount);
+        if (pay >= 0.01) {
+          transfers.push({
+            from: debtors[i].person,
+            to: creditors[j].person,
+            amount: Number(pay.toFixed(2))
+          });
+        }
+        debtors[i].amount = Number((debtors[i].amount - pay
